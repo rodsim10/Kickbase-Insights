@@ -118,7 +118,7 @@ def main() -> None:
 
         league_user_stats_tables(user_token, selected_league)
 
-        # live_points(user_token, selected_league) # needs to be run first to initialize the live_points.json file
+        live_points(user_token, selected_league) # needs taken_players.json + league_user_stats.json, so it runs after those
     except exceptions.LoginException as e:
         print(e)
         return
@@ -753,51 +753,85 @@ def league_user_stats_tables(user_token: str, selected_league: object) -> None:
     miscellaneous.write_json_to_file({"time": datetime.now().isoformat()}, "ts_league_user_stats.json")
 
 
-def live_points(user_token: str, selected_league: object) -> list:
-    """### Retrieves the live points for the players in a users team.
+def live_points(user_token: str) -> list:
+    """### Retrieves the live points for every manager's players in the league.
+
+    Kickbase only exposes live points per player (via the playercenter endpoint), so each
+    owned player from taken_players.json is queried and the results are grouped by manager.
 
     Args:
         user_token (str): The user's kkstrauth token.
         selected_league (object): The league the user wants to get data from for the frontend.
 
     Returns:
-        list: The live points of every user in the league, including their players.
+        list: The live points of every manager in the league, including their players.
     """
     logging.info("Getting live points...")
 
-    ### Get the current live points
-    live_points = competitions.live_points(user_token, selected_league.id)
+    ### Owned players grouped by manager, produced earlier in the run by taken_free_players()
+    with open(path.join(DATA_DIR, "taken_players.json"), "r") as f:
+        taken_players = json.load(f)
+
+    ### Map manager names to user IDs (STATIC_users.json is userId -> userName)
+    with open(path.join(DATA_DIR, "STATIC_users.json"), "r") as f:
+        league_users = json.load(f)
+    name_to_id = {name: user_id for user_id, name in league_users.items()}
+
+    ### Season totals per user, computed earlier by league_user_stats_tables()
+    total_points_by_id = {}
+    league_user_stats_path = path.join(DATA_DIR, "league_user_stats.json")
+    if path.exists(league_user_stats_path):
+        with open(league_user_stats_path, "r") as f:
+            for entry in json.load(f):
+                total_points_by_id[entry["userId"]] = entry.get("points", 0)
+
+    ### Group owned players by their manager
+    managers = {}
+    for player in taken_players:
+        managers.setdefault(player["owner"], []).append(player)
+
+    ### Fetch every player's live points up front, one request per player run concurrently
+    competitions.prefetch_livepoints(user_token, [player["playerId"] for player in taken_players])
 
     ### Create a custom json dict for every user and his players
     final_live_points = []
 
-    for real_user in live_points["u"]:
-        ### Create a custom json dict for every player of the user
-        players = []
+    for manager_name, players in managers.items():
+        player_entries = []
+        live_total = 0
 
-        for player in real_user["pl"]:
-            players.append({
-                "playerId": player["id"],
-                "teamId": player["tid"],
-                "firstName": player.get("fn", ""),
-                "lastName": player["n"],
-                "number": player["nr"],
-                "points": player["t"],
-                "goals": player["g"],
-                "assists": player["a"],
-                "redCards": player["r"],
-                "yellowCards": player["y"],
-                "yellowRedCards": player["yr"],
-                ### Custom attributes for the frontend
-                "fullName": f"{player.get('fn', '')} {player['n']} ({player['nr']})",
+        ### Fetch live points per player
+        for player in players:
+            live = competitions.player_livepoints(user_token, player["playerId"])
+
+            points = live.get("p", 0) or 0
+            live_total += points
+
+            player_entries.append({
+                "playerId": player["playerId"],
+                "teamId": player["teamId"],
+                "firstName": player.get("firstName"),
+                "lastName": player["lastName"],
+                "points": points,
+                "status": live.get("st", player.get("status", 0)),
+                ### TODO: Goals/assists/cards may be in the event[] list, but idk
+                "goals": 0,
+                "assists": 0,
+                "redCards": 0,
+                "yellowCards": 0,
+                "yellowRedCards": 0,
+                ### Custom attribute for the frontend
+                "fullName": f"{player.get('firstName') or ''} {player['lastName']}".strip(),
             })
 
+        user_id = name_to_id.get(manager_name, manager_name)
+
         final_live_points.append({
-            "userId": real_user["id"],
-            "userName": real_user["n"],
-            "livePoints": real_user["t"],
-            "totalPoints": real_user["st"],
-            "players": players,
+            "userId": user_id,
+            "userName": manager_name,
+            "livePoints": live_total,
+            "totalPoints": total_points_by_id.get(user_id, 0),
+            "players": player_entries,
         })
 
     logging.info("Got live points.")
