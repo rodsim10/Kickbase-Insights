@@ -4,23 +4,13 @@
 TODO: Maybe list all functions here automatically?
 """
 
-import logging
 import requests
-
-from concurrent.futures import ThreadPoolExecutor
 
 from backend import exceptions, miscellaneous
 from backend.kickbase.endpoints.leagues import League_Info, Market_Players
 
 ### -------------------------------------------------------------------
 
-### Per-run caches
-## main.py walks every player twice, in market_value_changes() and in taken_free_players()
-## and pages the activity feed three times. None of that changes during a run, so each response is fetched once and reused
-MAX_PLAYER_WORKERS = 8
-
-_player_statistics_cache = {}
-_player_marketvalue_cache = {}
 _transfers_cache = {}
 _user_stats_cache = {}
 _battles_cache = {}
@@ -28,8 +18,6 @@ _battles_cache = {}
 
 def clear_caches() -> None:
     """### Empty the per-run API caches."""
-    _player_statistics_cache.clear()
-    _player_marketvalue_cache.clear()
     _transfers_cache.clear()
     _user_stats_cache.clear()
     _battles_cache.clear()
@@ -99,92 +87,6 @@ def get_market(token: str, league_id: str):
     players_on_market = [Market_Players(player) for player in json_response["it"]]
 
     return players_on_market
-
-
-def prefetch_players(token: str, league_id: str, player_ids) -> None:
-    """### Fetch statistics and market value history for many players at once.
-
-    market_value_changes() needs both for every player (stats + market value) in the competition.
-    They run concurrently and fill the same caches the individual functions use.
-
-    Args:
-        token (str): The user's kkstrauth token.
-        league_id (str): The league to fetch statistics for.
-        player_ids (iterable): The player IDs to fetch.
-    """
-    ids = sorted({str(player_id) for player_id in player_ids})
-
-    missing_statistics = [p for p in ids if (league_id, p) not in _player_statistics_cache]
-    missing_marketvalues = [p for p in ids if p not in _player_marketvalue_cache]
-
-    if not missing_statistics and not missing_marketvalues:
-        return
-
-    logging.debug(f"Prefetching {len(missing_statistics)} player statistic(s) "
-                  f"and {len(missing_marketvalues)} market value history/histories...")
-
-    with ThreadPoolExecutor(max_workers=MAX_PLAYER_WORKERS) as executor:
-        futures = [executor.submit(player_statistics, token, league_id, p)
-                   for p in missing_statistics]
-        futures += [executor.submit(player_marketvalue, token, p)
-                    for p in missing_marketvalues]
-
-        ### Surface any exception rather than letting it disappear into the pool
-        for future in futures:
-            future.result()
-
-
-def player_statistics(token: str, league_id: str, player_id: str):
-    """
-    ### Get the statistics of a given player.
-    """
-    cache_key = (league_id, str(player_id))
-    if cache_key in _player_statistics_cache:
-        return _player_statistics_cache[cache_key]
-
-    url = f"https://api.kickbase.com/v4/competitions/1/players/{player_id}?leagueId={league_id}"
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Accept-Language": "de-DE,de;q=0.9", # localized for 'stxt' (status)
-        "Cookie": f"kkstrauth={token};",
-    }
-
-    ### Send GET request to get the market value changes of ALL players in the league
-    try:
-        json_response = requests.get(url, headers=headers).json()
-    except:
-        raise exceptions.NotificatonException("Notification failed! Please check your Discord Webhook URL.") # TODO: Change exception
-
-    _player_statistics_cache[cache_key] = json_response
-
-    return json_response
-
-
-def player_marketvalue(token: str, player_id: str):
-    """
-    ### Get the market value history of a given player.
-    """
-    cache_key = str(player_id)
-    if cache_key in _player_marketvalue_cache:
-        return _player_marketvalue_cache[cache_key]
-
-    url_1year = f"https://api.kickbase.com/v4/competitions/1/players/{player_id}/marketValue/365"
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Cookie": f"kkstrauth={token};",
-    }
-
-    ### Send GET request to get the market value changes of ALL players in the league
-    try:
-        json_response = requests.get(url_1year, headers=headers).json()
-    except:
-        raise exceptions.NotificatonException("Notification failed! Please check your Discord Webhook URL.") # TODO: Change exception
-
-    _player_marketvalue_cache[cache_key] = json_response["it"]
-
-    return json_response["it"] ### Only return the "it" list
 
 
 def get_users(token: str, league_id: str):

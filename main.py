@@ -229,10 +229,10 @@ def market(user_token: str, selected_league: object, own_user_id: str) -> None:
             player.position = 1 ### Default to "Torwart" (Goalkeeper)
 
         ### The status note only exists on the player profile, not on the market entry
-        player_stats = leagues.player_statistics(user_token, selected_league.id, player.id)
+        player_stats = competitions.player_statistics(user_token, selected_league.id, player.id)
         status_text = (player_stats.get("stxt") or "").strip() or None
 
-        deltas = miscellaneous.market_value_deltas(leagues.player_marketvalue(user_token, player.id))
+        deltas = miscellaneous.market_value_deltas(competitions.player_marketvalue(user_token, player.id))
 
         own_bid = player.own_offer(own_user_id)
 
@@ -293,15 +293,15 @@ def market_value_changes(user_token: str, selected_league: object) -> None:
     ### Fetch every player's statistics and market value history up front
     ## The loop below needs two requests per player
     all_player_ids = [player["i"] for team in all_teams_in_competition for player in team["players"]]
-    leagues.prefetch_players(user_token, selected_league.id, all_player_ids)
+    competitions.prefetch_players(user_token, selected_league.id, all_player_ids)
 
     ### Loop through all teams
     for team in all_teams_in_competition:
         ### Loop through all players in the team
         for player in team["players"]:
             ### Get the market value changes for the player
-            player_stats = leagues.player_statistics(user_token, selected_league.id, player["i"])
-            player_marketvalue = leagues.player_marketvalue(user_token, player["i"])
+            player_stats = competitions.player_statistics(user_token, selected_league.id, player["i"])
+            player_marketvalue = competitions.player_marketvalue(user_token, player["i"])
 
             ### Check if player is owned by a user in this league
             ## Ownership lives in the per-league "opl" list, not in the top level "oui"
@@ -376,7 +376,7 @@ def taken_free_players(user_token: str, selected_league: object):
         for player in team["players"]:
 
             ### Search the stats of the given player ID to fill the missing attributes for the player
-            player_stats = leagues.player_statistics(user_token, selected_league.id, player["i"])
+            player_stats = competitions.player_statistics(user_token, selected_league.id, player["i"])
 
             ### Check if the player is owned by a user in this league
             ### Ownership lives in the per-league "opl" list, not in the top level "oui".
@@ -404,7 +404,7 @@ def taken_free_players(user_token: str, selected_league: object):
                     ### Do this because the player was assigned at the start of the season
                     start_date = miscellaneous.get_start_datetime().strftime("%d.%m.%Y")
 
-                    player_marketvalues = leagues.player_marketvalue(user_token, player["i"])
+                    player_marketvalues = competitions.player_marketvalue(user_token, player["i"])
 
                     for marketValue in player_marketvalues:
                         ### Convert the Julian date to a standard date
@@ -534,7 +534,7 @@ def turnovers(user_token: str, selected_league: object) -> None:
             transfer_type = "unknown"
 
         ### Search the stats of the given player ID to fill the missing attributes for the player
-        player_stats = leagues.player_statistics(user_token, selected_league.id, item["data"]["pi"])
+        player_stats = competitions.player_statistics(user_token, selected_league.id, item["data"]["pi"])
 
         ### Create a custom json dict for every transfer
         transfers.append({
@@ -585,7 +585,7 @@ def turnovers(user_token: str, selected_league: object) -> None:
             start_date = start_datetime.strftime("%d.%m.%Y")
 
             ### Search the stats of the given player ID to fill the missing attributes for the player
-            player_marketvalues = leagues.player_marketvalue(user_token, transfer["playerId"])
+            player_marketvalues = competitions.player_marketvalue(user_token, transfer["playerId"])
 
             ### Set the price to the START_DATE value in the player_marketvalues list
             ### Do this because the player was assigned at the start of the season
@@ -766,7 +766,7 @@ def live_points(user_token: str, selected_league: object) -> list:
     logging.info("Getting live points...")
 
     ### Get the current live points
-    live_points = leagues.live_points(user_token, selected_league.id)
+    live_points = competitions.live_points(user_token, selected_league.id)
 
     ### Create a custom json dict for every user and his players
     final_live_points = []
