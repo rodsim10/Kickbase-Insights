@@ -1,19 +1,21 @@
 import logging
-import json
 
-from datetime import datetime
 from os import getenv
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-from backend import miscellaneous
-from backend.kickbase.v1 import leagues, user
+from backend import exceptions
+from backend.kickbase.v4 import competitions, user, leagues
+
+import main
 
 ### ===============================================================================
 
 ### Get the needed environment variables
 kb_mail = getenv("KB_MAIL")
 kb_password = getenv("KB_PASSWORD")
+discord_webhook = getenv("DISCORD_WEBHOOK")
+preferred_league_name = getenv("KB_LIGA")
 
 ### ===============================================================================
 
@@ -22,57 +24,29 @@ CORS(app)  # This will enable CORS for all routes
 
 @app.route("/api/livepoints", methods=["GET"])
 def get_live_points():
-    print("Flask API: Getting live points...")
+    logging.info("Flask API: Getting live points...")
 
-    ### Login to Kickbase
-    user_info, league_info, user_token = user.login(kb_mail, kb_password)
+    try:
+        ### Login to Kickbase and pick the same league the periodic run uses
+        user_info, user_token = user.login(kb_mail, kb_password, discord_webhook)
 
-    ### Get the current live points
-    live_points = leagues.live_points(user_token, league_info[0].id)
+        league_list = leagues.get_league_list(user_token)
+        if not league_list:
+            return jsonify({"error": "No leagues found."}), 404
 
-    ### Create a custom json dict for every user and his players
-    final_live_points = []
+        selected_league = next((league for league in league_list if league.name == preferred_league_name), league_list[0])
 
-    for users in live_points["u"]:
-        ### Create a custom json dict for every player of the user
-        players = []
+        ### Long-running server: drop the cached live points so every refresh is fresh
+        competitions.clear_caches()
 
-        for player in users["pl"]:
-            players.append({
-                "playerId": player["id"],
-                "teamId": player["tid"],
-                "firstName": player.get("fn", ""),  # Use an empty string if "fn" is not present
-                "lastName": player["n"],
-                "number": player["nr"],
-                "points": player["t"],
-                "goals": player["g"],
-                "assists": player["a"],
-                "redCards": player["r"],
-                "yellowCards": player["y"],
-                "yellowRedCards": player["yr"],
-                ### Custom attributes for the frontend
-                "fullName": f"{player.get('n', '')} {player['n']} ({player['nr']})",
-            })
+        ### Reuse the periodic run's logic so the refresh output matches it exactly
+        ## Relies on taken_players.json + league_user_stats.json from the last full run
+        final_live_points = main.live_points(user_token, selected_league)
+    except exceptions.KickbaseException as e:
+        logging.error(f"Flask API: Failed to get live points: {e}")
+        return jsonify({"error": str(e)}), 502
 
-        final_live_points.append({
-            "userId": users["id"],
-            "userName": users["n"],
-            # Profile Pic?
-            "livePoints": users["t"],
-            "totalPoints": users["st"],
-            "players": players,
-        })
-
-    print("Flask API: Got live points.\n")
-
-    with open("/code/frontend/src/data/live_points.json", "w") as f:
-        f.write(json.dumps(final_live_points, indent=2))
-        logging.debug("Created file live_points.json")
-
-    ### Timestamp for frontend
-    with open("/code/frontend/src/data/timestamps/ts_live_points.json", "w") as f:
-        f.writelines(json.dumps({"time": datetime.now().isoformat()}))
-        logging.debug("Created file ts_live_points.json")
+    logging.info("Flask API: Got live points.")
 
     ### Return the live points
     return jsonify(final_live_points)
