@@ -4,13 +4,13 @@
 TODO: Maybe list all functions here automatically?
 """
 
-import requests
-import logging
 import json
-
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from backend import miscellaneous, exceptions
+import requests
+
+from backend import exceptions, miscellaneous
 
 ### -------------------------------------------------------------------
 
@@ -182,7 +182,7 @@ def prefetch_players(token: str, league_id: str, player_ids) -> None:
             future.result()
 
 
-def player_statistics(token: str, league_id: str, player_id: str):
+def player_statistics(token: str, league_id: str, player_id: str) -> dict:
     """
     ### Get the statistics of a given player.
     """
@@ -190,6 +190,7 @@ def player_statistics(token: str, league_id: str, player_id: str):
     if cache_key in _player_statistics_cache:
         return _player_statistics_cache[cache_key]
 
+    ### TODO: League ID is unnecessary here obviously. Can be removed.
     url = f"https://api.kickbase.com/v4/competitions/1/players/{player_id}?leagueId={league_id}"
     headers = {
         "Content-Type": "application/json",
@@ -202,14 +203,14 @@ def player_statistics(token: str, league_id: str, player_id: str):
     try:
         json_response = requests.get(url, headers=headers).json()
     except:
-        raise exceptions.NotificatonException("Notification failed! Please check your Discord Webhook URL.") # TODO: Change exception
+        raise exceptions.NotificatonException("Couldn't get the statistics of the player.") # TODO: Change exception
 
     _player_statistics_cache[cache_key] = json_response
 
     return json_response
 
 
-def player_marketvalue(token: str, player_id: str):
+def player_marketvalue(token: str, player_id: str) -> list:
     """
     ### Get the market value history of a given player.
     """
@@ -228,7 +229,7 @@ def player_marketvalue(token: str, player_id: str):
     try:
         json_response = requests.get(url_1year, headers=headers).json()
     except:
-        raise exceptions.NotificatonException("Notification failed! Please check your Discord Webhook URL.") # TODO: Change exception
+        raise exceptions.NotificatonException("Couldn't get the market value history of the player.") # TODO: Change exception
 
     _player_marketvalue_cache[cache_key] = json_response["it"]
 
