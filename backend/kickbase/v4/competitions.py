@@ -24,12 +24,14 @@ MAX_PLAYER_WORKERS = 8
 
 _player_statistics_cache = {}
 _player_marketvalue_cache = {}
+_player_livepoints_cache = {}
 
 
 def clear_caches() -> None:
     """### Empty the per-run API caches."""
     _player_statistics_cache.clear()
     _player_marketvalue_cache.clear()
+    _player_livepoints_cache.clear()
 
 
 def get_team_overview(token: str) -> dict:
@@ -232,3 +234,81 @@ def player_marketvalue(token: str, player_id: str):
 
     return json_response["it"] ### Only return the "it" list
 
+
+def player_livepoints(token: str, player_id: str) -> dict:
+    """
+    ### Get the live points of a given player.
+
+    Expected response:
+    ```json
+    {
+        "i": "8329", // PlayerID
+        "tid": "2", // TeamID
+        "n": "Olise", // Player Surname
+        "t1": 2, // Team 1 ID
+        "t2": 9, // Team 2 ID
+        "t1g": 1, // Team 1 Goals
+        "t2g": 0, // Team 2 Goals
+        "p": 66, // Live Points
+        "st": 5, // Status
+        "mi": 11914, // ?? Match ID
+        "mt": 46, // Current match minute
+        "mtd": "45",
+        "md": "2026-08-28T18:30:00Z", // Kickoff date & time
+        "mst": 4,
+        "k": [], // ?? Goals of the player
+        "events": [ ... ], // All events for this player
+        "pim": "content/file/4a58697a5cbe48ed82444be2e0a1edb6.png",
+        "t1im": "content/file/ff70df040a9f4179a7b45219225a2273.svg",
+        "t2im": "content/file/9a1bb78d0ccf45f895797c0c6d8c4d40.svg"
+    }
+    ```
+    """
+    cache_key = str(player_id)
+    if cache_key in _player_livepoints_cache:
+        return _player_livepoints_cache[cache_key]
+
+    url = f"https://api.kickbase.com/v4/competitions/1/playercenter/{player_id}"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Accept-Language": "de-DE,de;q=0.9", # localized for 'stxt' (status)
+        "Cookie": f"kkstrauth={token};",
+    }
+
+    ### Send GET request to get the live points of the player
+    try:
+        json_response = requests.get(url, headers=headers).json()
+    except:
+        raise exceptions.KickbaseException("Couldn't get the live points of the player.")
+
+    _player_livepoints_cache[cache_key] = json_response
+
+    return json_response
+
+
+def prefetch_livepoints(token: str, player_ids) -> None:
+    """### Fetch live points for many players at once.
+
+    live_points() needs one request per owned player, so they run concurrently and
+    fill the same cache the individual function uses.
+
+    Args:
+        token (str): The user's kkstrauth token.
+        player_ids (iterable): The player IDs to fetch.
+    """
+    ids = sorted({str(player_id) for player_id in player_ids})
+
+    missing = [p for p in ids if p not in _player_livepoints_cache]
+
+    if not missing:
+        return
+
+    logging.debug(f"Prefetching live points for {len(missing)} player(s)...")
+
+    with ThreadPoolExecutor(max_workers=MAX_PLAYER_WORKERS) as executor:
+        futures = [executor.submit(player_livepoints, token, p) for p in missing]
+
+        ### Surface any exception rather than letting it disappear into the pool
+        for future in futures:
+            future.result()
