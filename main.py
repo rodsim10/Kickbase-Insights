@@ -118,7 +118,7 @@ def main() -> None:
 
         league_user_stats_tables(user_token, selected_league)
 
-        live_points(user_token, selected_league) # needs taken_players.json + league_user_stats.json, so it runs after those
+        live_points(selected_league)
     except exceptions.LoginException as e:
         print(e)
         return
