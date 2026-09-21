@@ -41,7 +41,7 @@ def get_live_points():
 
         ### Reuse the periodic run's logic so the refresh output matches it exactly
         ## Relies on taken_players.json + league_user_stats.json from the last full run
-        final_live_points = main.live_points(user_token, selected_league)
+        final_live_points = main.live_points(selected_league)
     except exceptions.KickbaseException as e:
         logging.error(f"Flask API: Failed to get live points: {e}")
         return jsonify({"error": str(e)}), 502
