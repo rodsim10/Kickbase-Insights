@@ -88,7 +88,7 @@ def get_live_points():
                 user_token,
                 selected_league
             )
-
+leagues.get_users(user_token, selected_league.id)
         # live_points() only needs the user token
         final_live_points = main.live_points(user_token)
 
